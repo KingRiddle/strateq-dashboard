@@ -39,7 +39,14 @@ let sb = null;
 let sbReady = false;
 try {
   if (SUPABASE_URL !== "https://YOUR_PROJECT_ID.supabase.co") {
-    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+    sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        storage: window.localStorage
+      }
+    });
     sbReady = true;
   }
 } catch(e) { console.warn("Supabase not configured:", e.message); }
@@ -964,19 +971,26 @@ function App(){
   // Supabase session restore
   useEffect(()=>{
     if(sbReady){
-      (async()=>{
+    (async()=>{
+      try {
         const {data:{session}}=await SB.getSession();
         if(session){
           const profile=await SB.getProfile(session.user.id);
           if(profile){ await doLogin({...profile,id:session.user.id}); }
-        }
-        setAppLoading(false);
-      })();
-      const {data:{subscription}}=SB.onAuthChange(async(event,session)=>{
-        if(event==="SIGNED_OUT"){ setUser(null); setProjects([]); }
-      });
-      return()=>subscription.unsubscribe();
-    } else { setAppLoading(false); }
+          else { setAppLoading(false); }
+        } else { setAppLoading(false); }
+      } catch(e){ console.warn("Session restore failed:",e); setAppLoading(false); }
+    })();
+    const {data:{subscription}}=SB.onAuthChange(async(event,session)=>{
+      if(event==="SIGNED_IN"&&session){
+        const profile=await SB.getProfile(session.user.id);
+        if(profile){ setUser({...profile,id:session.user.id}); const p=await SB.getProjects(session.user.id); setProjects(p); }
+      }
+      if(event==="SIGNED_OUT"){ setUser(null); setProjects([]); setView("home"); }
+      if(event==="TOKEN_REFRESHED"){ console.log("Session refreshed successfully"); }
+    });
+    return()=>subscription.unsubscribe();
+  } else { setAppLoading(false); }
   },[]);
 
   useEffect(()=>{ if(!user)return; const t=setInterval(()=>refreshNotifs(),15000); return()=>clearInterval(t); },[user]);
